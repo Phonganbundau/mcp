@@ -1,5 +1,7 @@
 # MCP Todo Demo
 
+![Demo](https://cdn.save.moe/b/7duXwsd.png)
+
 Minimal Model Context Protocol stack consisting of:
 
 - **mcp-server** — Spring Boot WebSocket server exposing the 4 required MCP todo tools
