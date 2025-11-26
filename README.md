@@ -1,6 +1,6 @@
 # MCP Todo Demo
 
-![Demo](https://cdn.save.moe/b/7duXwsd.png)
+![Demo](https://cdn.save.moe/b/dBzo5yf.png)
 
 Minimal Model Context Protocol stack consisting of:
 
