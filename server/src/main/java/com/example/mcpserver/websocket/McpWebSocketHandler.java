@@ -2,6 +2,7 @@ package com.example.mcpserver.websocket;
 
 import com.example.mcpserver.todo.Todo;
 import com.example.mcpserver.todo.TodoService;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -81,11 +82,15 @@ public class McpWebSocketHandler extends TextWebSocketHandler {
 
         try {
             switch (toolName) {
-                case "todo_create" -> result.set("todo", serialize(todoService.create(
-                        requireText(arguments, "title"),
-                        arguments.path("completed").asBoolean(false)
-                )));
-                case "todo_list" -> result.set("todos", serialize(todoService.list()));
+                case "todo_create" -> {
+                    Todo created = todoService.create(
+                            requireText(arguments, "title"),
+                            arguments.path("completed").asBoolean(false)
+                    );
+                    result.set("todo", serialize(created));
+                    attachDashboardPayload(result);
+                }
+                case "todo_list" -> attachDashboardPayload(result);
                 case "todo_update" -> {
                     String id = requireText(arguments, "id");
                     Optional<String> title = optionalText(arguments, "title");
@@ -93,6 +98,7 @@ public class McpWebSocketHandler extends TextWebSocketHandler {
                     Todo updated = todoService.update(id, title, completed)
                             .orElseThrow(() -> new IllegalArgumentException("Todo not found"));
                     result.set("todo", serialize(updated));
+                    attachDashboardPayload(result);
                 }
                 case "todo_delete" -> {
                     String id = requireText(arguments, "id");
@@ -102,6 +108,7 @@ public class McpWebSocketHandler extends TextWebSocketHandler {
                     }
                     result.put("deleted", true);
                     result.put("id", id);
+                    attachDashboardPayload(result);
                 }
                 default -> throw new IllegalArgumentException("Unknown tool: " + toolName);
             }
@@ -143,6 +150,387 @@ public class McpWebSocketHandler extends TextWebSocketHandler {
         node.set("inputSchema", inputSchema);
         node.set("outputSchema", outputSchema);
         return node;
+    }
+
+    private void attachDashboardPayload(ObjectNode target) {
+        List<Todo> snapshot = todoService.list();
+        target.set("todos", serialize(snapshot));
+        target.set("ui", buildTodoUiResource(snapshot));
+    }
+
+    private ObjectNode buildTodoUiResource(List<Todo> todos) {
+        ObjectNode wrapper = mapper.createObjectNode();
+        wrapper.put("type", "resource");
+        ObjectNode resource = mapper.createObjectNode();
+        resource.put("uri", "ui://todo/dashboard");
+        resource.put("mimeType", "text/html");
+        resource.put("text", renderTodoDashboardHtml(todos));
+        wrapper.set("resource", resource);
+        return wrapper;
+    }
+
+    private String renderTodoDashboardHtml(List<Todo> todos) {
+        String safeJson;
+        try {
+            safeJson = mapper.writeValueAsString(todos).replace("</", "<\\/");
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Unable to serialize todos for MCP-UI rendering", e);
+        }
+
+        return """
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                  <meta charset="UTF-8" />
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                  <style>
+                    :root {
+                      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                      color-scheme: light;
+                    }
+                    body {
+                      margin: 0;
+                      padding: 16px;
+                      background: #f8fafc;
+                      color: #0f172a;
+                    }
+                    .card {
+                      background: #fff;
+                      border-radius: 14px;
+                      padding: 24px;
+                      box-shadow: 0 25px 70px rgba(15,23,42,0.12);
+                      margin-bottom: 20px;
+                    }
+                    .card-header {
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      gap: 12px;
+                      flex-wrap: wrap;
+                    }
+                    .card-header h2 {
+                      margin: 0;
+                      font-size: 1.3rem;
+                    }
+                    .muted {
+                      margin: 4px 0 0;
+                      color: #64748b;
+                      font-size: 0.9rem;
+                    }
+                    .ghost {
+                      border: 1px solid #0f172a;
+                      border-radius: 999px;
+                      padding: 0.4rem 1.5rem;
+                      font-weight: 600;
+                      background: transparent;
+                      cursor: pointer;
+                    }
+                    .form-grid {
+                      margin-top: 20px;
+                      display: grid;
+                      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                      gap: 16px;
+                    }
+                    .form-card {
+                      border: 1px solid #e2e8f0;
+                      border-radius: 12px;
+                      padding: 16px;
+                      display: flex;
+                      flex-direction: column;
+                      gap: 12px;
+                    }
+                    .form-card h3 {
+                      margin: 0;
+                    }
+                    .field {
+                      display: flex;
+                      flex-direction: column;
+                      gap: 6px;
+                      font-size: 0.9rem;
+                      color: #475569;
+                    }
+                    .field input,
+                    .field select {
+                      border-radius: 8px;
+                      border: 1px solid #cbd5f5;
+                      padding: 0.55rem;
+                      font-size: 0.95rem;
+                    }
+                    .check {
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      font-weight: 500;
+                    }
+                    .form-card button {
+                      border: none;
+                      border-radius: 10px;
+                      padding: 0.6rem;
+                      font-weight: 600;
+                      background: #0f172a;
+                      color: #fff;
+                      cursor: pointer;
+                    }
+                    .form-card button.danger {
+                      background: #dc2626;
+                    }
+                    .todo-list {
+                      list-style: none;
+                      padding: 0;
+                      margin: 0;
+                      display: flex;
+                      flex-direction: column;
+                      gap: 12px;
+                    }
+                    .todo-item {
+                      border: 1px solid #e2e8f0;
+                      border-radius: 12px;
+                      padding: 12px 16px;
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      gap: 12px;
+                    }
+                    .todo-copy {
+                      display: flex;
+                      flex-direction: column;
+                      gap: 4px;
+                    }
+                    .todo-title {
+                      margin: 0;
+                      font-weight: 600;
+                    }
+                    .todo-id {
+                      margin: 0;
+                      font-size: 0.75rem;
+                      color: #94a3b8;
+                      word-break: break-all;
+                    }
+                    .status {
+                      padding: 0.25rem 0.75rem;
+                      border-radius: 999px;
+                      font-size: 0.85rem;
+                      font-weight: 600;
+                    }
+                    .status.done {
+                      background: #dcfce7;
+                      color: #15803d;
+                    }
+                    .status.open {
+                      background: #fee2e2;
+                      color: #b91c1c;
+                    }
+                    .empty {
+                      margin: 0;
+                      color: #94a3b8;
+                    }
+                    .message {
+                      border-radius: 10px;
+                      padding: 12px 16px;
+                      font-size: 0.95rem;
+                      font-weight: 500;
+                      background: #eef2ff;
+                      color: #312e81;
+                    }
+                    .hidden {
+                      display: none;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <section class="card">
+                    <div class="card-header">
+                      <div>
+                        <h2>MCP Todo Dashboard</h2>
+                        <p class="muted">Rendered via MCP-UI from the Java Spring server.</p>
+                      </div>
+                      <button id="refresh-btn" class="ghost">Refresh</button>
+                    </div>
+                    <div class="form-grid">
+                      <form id="create-form" class="form-card">
+                        <h3>Add Todo</h3>
+                        <label class="field">
+                          <span>Title</span>
+                          <input name="title" placeholder="Write documentation" />
+                        </label>
+                        <label class="check">
+                          <input type="checkbox" name="completed" />
+                          <span>Mark as completed</span>
+                        </label>
+                        <button type="submit">Create</button>
+                      </form>
+                      <form id="update-form" class="form-card">
+                        <h3>Edit Todo</h3>
+                        <label class="field">
+                          <span>Todo</span>
+                          <select id="update-id" name="id"></select>
+                        </label>
+                        <label class="field">
+                          <span>New title (optional)</span>
+                          <input name="newTitle" placeholder="Keep blank to keep current" />
+                        </label>
+                        <label class="check">
+                          <input type="checkbox" name="newCompleted" />
+                          <span>Completed</span>
+                        </label>
+                        <button type="submit">Update</button>
+                      </form>
+                      <form id="delete-form" class="form-card">
+                        <h3>Delete Todo</h3>
+                        <label class="field">
+                          <span>Todo</span>
+                          <select id="delete-id" name="id"></select>
+                        </label>
+                        <button type="submit" class="danger">Delete</button>
+                      </form>
+                    </div>
+                  </section>
+                  <section class="card">
+                    <h3>Todos</h3>
+                    <ul id="todo-items" class="todo-list"></ul>
+                  </section>
+                  <div id="message" class="message hidden"></div>
+                  <script type="application/json" id="todos-data">%s</script>
+                  <script>
+                    (function () {
+                      const messageBox = document.getElementById('message');
+                      const setMessage = (text) => {
+                        if (!text) {
+                          messageBox.classList.add('hidden');
+                          return;
+                        }
+                        messageBox.textContent = text;
+                        messageBox.classList.remove('hidden');
+                      };
+
+                      const sendTool = (toolName, params) => {
+                        if (window?.parent) {
+                          window.parent.postMessage({ type: 'tool', payload: { toolName, params } }, '*');
+                          setMessage('Sent request to ' + toolName + ' ...');
+                        } else {
+                          setMessage('Missing host frame to send MCP event.');
+                        }
+                      };
+
+                      const parseTodos = () => {
+                        try {
+                          return JSON.parse(document.getElementById('todos-data').textContent || '[]');
+                        } catch (err) {
+                          console.error('Failed to parse todos', err);
+                          return [];
+                        }
+                      };
+
+                      const renderTodos = (items) => {
+                        const list = document.getElementById('todo-items');
+                        list.innerHTML = '';
+                        if (!items.length) {
+                          const empty = document.createElement('p');
+                          empty.className = 'empty';
+                          empty.textContent = 'No todos yet.';
+                          list.appendChild(empty);
+                          return;
+                        }
+                        items.forEach((todo) => {
+                          const li = document.createElement('li');
+                          li.className = 'todo-item';
+                          const copy = document.createElement('div');
+                          copy.className = 'todo-copy';
+                          const title = document.createElement('p');
+                          title.className = 'todo-title';
+                          title.textContent = todo.title;
+                          const id = document.createElement('p');
+                          id.className = 'todo-id';
+                          id.textContent = todo.id;
+                          copy.appendChild(title);
+                          copy.appendChild(id);
+                          const status = document.createElement('span');
+                          status.className = 'status ' + (todo.completed ? 'done' : 'open');
+                          status.textContent = todo.completed ? 'Done' : 'Open';
+                          li.appendChild(copy);
+                          li.appendChild(status);
+                          list.appendChild(li);
+                        });
+                      };
+
+                      const populateSelect = (select, items) => {
+                        select.innerHTML = '';
+                        const placeholder = document.createElement('option');
+                        placeholder.value = '';
+                        placeholder.textContent = 'Select todo';
+                        placeholder.disabled = true;
+                        placeholder.selected = true;
+                        select.appendChild(placeholder);
+                        items.forEach((todo) => {
+                          const option = document.createElement('option');
+                          option.value = todo.id;
+                          option.textContent = todo.title;
+                          select.appendChild(option);
+                        });
+                      };
+
+                      const refreshSelects = (items) => {
+                        ['update-id', 'delete-id'].forEach((id) => {
+                          const select = document.getElementById(id);
+                          if (select) {
+                            populateSelect(select, items);
+                          }
+                        });
+                      };
+
+                      const todos = parseTodos();
+                      renderTodos(todos);
+                      refreshSelects(todos);
+
+                      document.getElementById('refresh-btn').addEventListener('click', () => {
+                        sendTool('todo_list', {});
+                      });
+
+                      document.getElementById('create-form').addEventListener('submit', (event) => {
+                        event.preventDefault();
+                        const form = event.target;
+                        const title = form.elements['title'].value.trim();
+                        const completed = form.elements['completed'].checked;
+                        if (!title) {
+                          setMessage('Title is required');
+                          return;
+                        }
+                        sendTool('todo_create', { title, completed });
+                        form.reset();
+                      });
+
+                      document.getElementById('update-form').addEventListener('submit', (event) => {
+                        event.preventDefault();
+                        const form = event.target;
+                        const id = form.elements['id'].value;
+                        if (!id) {
+                          setMessage('Select a todo to update');
+                          return;
+                        }
+                        const payload = { id };
+                        const newTitle = form.elements['newTitle'].value.trim();
+                        if (newTitle) {
+                          payload.title = newTitle;
+                        }
+                        payload.completed = form.elements['newCompleted'].checked;
+                        sendTool('todo_update', payload);
+                      });
+
+                      document.getElementById('delete-form').addEventListener('submit', (event) => {
+                        event.preventDefault();
+                        const form = event.target;
+                        const id = form.elements['id'].value;
+                        if (!id) {
+                          setMessage('Select a todo to delete');
+                          return;
+                        }
+                        sendTool('todo_delete', { id });
+                      });
+                    })();
+                  </script>
+                </body>
+                </html>
+                """.formatted(safeJson);
     }
 
     private ObjectNode createInputSchema() {

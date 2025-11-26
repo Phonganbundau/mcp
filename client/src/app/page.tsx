@@ -1,5 +1,11 @@
 "use client";
 
+import { UIResourceRenderer, type UIActionResult } from "@mcp-ui/client";
+import type {
+  BlobResourceContents,
+  EmbeddedResource,
+  TextResourceContents,
+} from "@modelcontextprotocol/sdk/types.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const DEFAULT_WS = process.env.NEXT_PUBLIC_MCP_WS_URL ?? "ws://localhost:8080/mcp";
@@ -17,16 +23,40 @@ type PendingRequest = {
   handler?: McpResultHandler;
 };
 
+type RenderableResource = TextResourceContents | BlobResourceContents;
+
+const asRenderableResource = (payload: unknown): RenderableResource | null => {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const maybeResource =
+    (payload as EmbeddedResource).type === "resource" && (payload as EmbeddedResource).resource
+      ? (payload as EmbeddedResource).resource
+      : (payload as TextResourceContents);
+  if (
+    !maybeResource ||
+    typeof maybeResource !== "object" ||
+    typeof maybeResource.mimeType !== "string"
+  ) {
+    return null;
+  }
+  if ("text" in maybeResource && typeof maybeResource.text === "string") {
+    return maybeResource as TextResourceContents;
+  }
+  if ("blob" in maybeResource && typeof (maybeResource as BlobResourceContents).blob === "string") {
+    return maybeResource as BlobResourceContents;
+  }
+  return null;
+};
+
 export default function Home() {
   const [wsStatus, setWsStatus] = useState<"connecting" | "open" | "closed">("connecting");
   const [todos, setTodos] = useState<Todo[]>([]);
   const [lastPayload, setLastPayload] = useState<string>("");
-  const [title, setTitle] = useState("");
-  const [updateId, setUpdateId] = useState("");
-  const [updateTitle, setUpdateTitle] = useState("");
-  const [updateCompleted, setUpdateCompleted] = useState(false);
-  const [deleteId, setDeleteId] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [uiResource, setUiResource] = useState<RenderableResource | null>(null);
+  const [uiVersion, setUiVersion] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const callbacks = useRef<Map<number, McpResultHandler>>(new Map());
@@ -89,7 +119,7 @@ export default function Home() {
   );
 
   const callTool = useCallback(
-    (name: string, args: Record<string, unknown>, handler?: McpResultHandler) => {
+    (name: string, args: Record<string, unknown> = {}, handler?: McpResultHandler) => {
       sendRequest(
         "tools/call",
         {
@@ -110,11 +140,20 @@ export default function Home() {
     });
   }, [sendRequest]);
 
+  const applyUiResource = useCallback((maybeResource: unknown) => {
+    const next = asRenderableResource(maybeResource);
+    if (next) {
+      setUiResource(next);
+      setUiVersion((prev) => prev + 1);
+    }
+  }, []);
+
   const listTodos = useCallback(() => {
     callTool("todo_list", {}, (payload) => {
       setTodos(payload.todos ?? []);
+      applyUiResource(payload.ui);
     });
-  }, [callTool]);
+  }, [callTool, applyUiResource]);
 
   useEffect(() => {
     const socket = new WebSocket(DEFAULT_WS);
@@ -153,6 +192,9 @@ export default function Home() {
         if (data.result?.deleted && data.result?.id) {
           setTodos((current) => current.filter((t) => t.id !== data.result.id));
         }
+        if (data.result?.ui) {
+          applyUiResource(data.result.ui);
+        }
       } catch (err) {
         console.error("Unable to parse MCP payload", err);
       }
@@ -167,56 +209,27 @@ export default function Home() {
     };
   }, [initialize, listTodos, flushPending]);
 
-  const addTodo = () => {
-    if (!title.trim()) {
-      setError("Title is required");
-      return;
-    }
-    callTool(
-      "todo_create",
-      { title: title.trim() },
-      () => {
-        setTitle("");
-        listTodos();
+  const handleUIAction = useCallback(
+    async (action: UIActionResult) => {
+      switch (action.type) {
+        case "tool":
+          await new Promise<void>((resolve) => {
+            callTool(action.payload.toolName, action.payload.params ?? {}, () => {
+              setInfo(`Executed ${action.payload.toolName}`);
+              listTodos();
+              resolve();
+            });
+          });
+          return;
+        case "notify":
+          setInfo(action.payload.message);
+          return;
+        default:
+          setInfo(`Unhandled MCP-UI action: ${action.type}`);
       }
-    );
-  };
-
-  const submitUpdate = () => {
-    if (!updateId.trim()) {
-      setError("Todo id is required");
-      return;
-    }
-    callTool(
-      "todo_update",
-      {
-        id: updateId.trim(),
-        ...(updateTitle.trim() ? { title: updateTitle.trim() } : {}),
-        completed: updateCompleted,
-      },
-      () => {
-        setUpdateTitle("");
-        setUpdateId("");
-        setUpdateCompleted(false);
-        listTodos();
-      }
-    );
-  };
-
-  const submitDelete = () => {
-    if (!deleteId.trim()) {
-      setError("Todo id is required");
-      return;
-    }
-    callTool(
-      "todo_delete",
-      { id: deleteId.trim() },
-      () => {
-        setDeleteId("");
-        listTodos();
-      }
-    );
-  };
+    },
+    [callTool, listTodos]
+  );
 
   return (
     <main style={styles.main}>
@@ -233,62 +246,31 @@ export default function Home() {
           </button>
         </header>
 
-        <div style={styles.grid}>
-          <div style={styles.card}>
-            <h3>Add Todo</h3>
-            <input
-              style={styles.input}
-              placeholder="Todo title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-            <button style={styles.primaryButton} onClick={addTodo}>
-              Add Todo
-            </button>
-          </div>
-
-          <div style={styles.card}>
-            <h3>Edit Todo</h3>
-            <input
-              style={styles.input}
-              placeholder="Todo ID"
-              value={updateId}
-              onChange={(e) => setUpdateId(e.target.value)}
-            />
-            <input
-              style={styles.input}
-              placeholder="New title (optional)"
-              value={updateTitle}
-              onChange={(e) => setUpdateTitle(e.target.value)}
-            />
-            <label style={styles.checkboxRow}>
-              <input
-                type="checkbox"
-                checked={updateCompleted}
-                onChange={(e) => setUpdateCompleted(e.target.checked)}
-              />
-              <span>Completed</span>
-            </label>
-            <button style={styles.primaryButton} onClick={submitUpdate}>
-              Edit Todo
-            </button>
-          </div>
-
-          <div style={styles.card}>
-            <h3>Delete Todo</h3>
-            <input
-              style={styles.input}
-              placeholder="Todo ID"
-              value={deleteId}
-              onChange={(e) => setDeleteId(e.target.value)}
-            />
-            <button style={styles.dangerButton} onClick={submitDelete}>
-              Delete Todo
-            </button>
-          </div>
-        </div>
-
         {error && <p style={styles.error}>{error}</p>}
+        {info && <p style={styles.info}>{info}</p>}
+
+        <section style={styles.uiSection}>
+          <h2>MCP-UI Resource</h2>
+          {uiResource ? (
+            <div style={styles.uiFrame}>
+              <UIResourceRenderer
+                key={uiVersion}
+                resource={uiResource}
+                onUIAction={handleUIAction}
+                supportedContentTypes={["rawHtml", "externalUrl"]}
+                htmlProps={{
+                  style: { border: "none", width: "100%", minHeight: 520 },
+                  autoResizeIframe: { height: true },
+                  sandboxPermissions: "allow-scripts allow-forms",
+                }}
+              />
+            </div>
+          ) : (
+            <p style={{ color: "#6b7280" }}>
+              Call any todo tool to load the MCP-UI dashboard from the server.
+            </p>
+          )}
+        </section>
 
         <div style={{ marginTop: "2rem" }}>
           <h2>Todos</h2>
@@ -337,39 +319,6 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     marginBottom: "1.5rem",
   },
-  grid: {
-    display: "grid",
-    gap: "1.5rem",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  },
-  card: {
-    border: "1px solid #e5e7eb",
-    borderRadius: 10,
-    padding: "1rem",
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.5rem",
-  },
-  input: {
-    padding: "0.65rem",
-    borderRadius: 8,
-    border: "1px solid #d1d5db",
-    fontSize: 14,
-  },
-  checkboxRow: {
-    display: "flex",
-    gap: "0.5rem",
-    alignItems: "center",
-    fontSize: 14,
-  },
-  primaryButton: {
-    background: "#111827",
-    border: "none",
-    borderRadius: 8,
-    padding: "0.65rem",
-    color: "white",
-    fontWeight: 600,
-  },
   secondaryButton: {
     background: "transparent",
     border: "1px solid #111827",
@@ -377,13 +326,15 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.5rem 1.5rem",
     fontWeight: 600,
   },
-  dangerButton: {
-    background: "#ef4444",
-    border: "none",
-    borderRadius: 8,
-    padding: "0.65rem",
-    color: "white",
-    fontWeight: 600,
+  uiSection: {
+    marginTop: "1.5rem",
+  },
+  uiFrame: {
+    marginTop: "0.75rem",
+    borderRadius: 12,
+    overflow: "hidden",
+    border: "1px solid #e5e7eb",
+    minHeight: 520,
   },
   todoList: {
     display: "flex",
@@ -409,5 +360,9 @@ const styles: Record<string, React.CSSProperties> = {
   error: {
     color: "#b91c1c",
     fontWeight: 600,
+  },
+  info: {
+    color: "#0f172a",
+    fontWeight: 500,
   },
 };
