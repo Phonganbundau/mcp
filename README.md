@@ -8,6 +8,7 @@ Minimal Model Context Protocol stack consisting of:
 
 - **mcp-server** — Spring Boot WebSocket server exposing the 4 required MCP todo tools
 - **mcp-ui** — Next.js UI that calls the tools through the MCP channel
+- **MCP Test Client with Gemini** - This test client simulates the **exact experience** of using MCP-UI inside a real LLM client (like Claude Desktop, Cursor, etc.). It uses Google's Gemini AI with native function calling to naturally interact with your MCP server.
 
 ## 1. Requirements
 
