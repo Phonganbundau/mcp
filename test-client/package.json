@@ -1,0 +1,26 @@
+{
+  "name": "mcp-test-client",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx src/index.ts"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@mcp-ui/client": "^5.14.1",
+    "@modelcontextprotocol/sdk": "^1.23.0",
+    "dotenv": "^16.4.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.0",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.1",
+    "typescript": "^5.4.5"
+  }
+}
+
