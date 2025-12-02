@@ -47,18 +47,139 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000` to interact with the UI host. By default it connects to `ws://localhost:8080/mcp`; change this by setting `NEXT_PUBLIC_MCP_WS_URL` before running `npm run dev` if the server uses another host/port.
+# MCP Test Client with Gemini
 
-### MCP-UI host experience
+This test client simulates the **exact experience** of using MCP-UI inside a real LLM client (like Claude Desktop, Cursor, etc.). It uses Google's Gemini AI with native function calling to naturally interact with your MCP server.
 
-The Next.js app is now a thin **MCP-UI host** built with `@mcp-ui/client`. It renders whatever UI resources the server returns:
+## 🎯 What This Demonstrates
 
-- `todo_list`, `todo_create`, `todo_update`, and `todo_delete` all respond with a `ui://todo/dashboard` HTML resource alongside the JSON payload.
-- The client feeds that resource into `<UIResourceRenderer />`, so the dashboard (forms, select boxes, refresh button, etc.) is authored entirely on the server and streamed through MCP.
-- Any HTML events call `window.parent.postMessage({ type: 'tool', payload: { toolName, params } }, '*')`; the host catches those via `onUIAction` and replays the correct MCP tool call.
-- Raw tool responses (JSON) are still shown in the "Last MCP Payload" box for debugging, and a lightweight fallback list mirrors the todo state outside the iframe.
+1. **Natural Language Interaction**: User chats with Gemini in plain English
+2. **Automatic Tool Calling**: Gemini analyzes the message and calls the appropriate MCP tool
+3. **Interactive UI Rendering**: Server returns an MCP-UI resource → rendered inline in the chat
+4. **Seamless Updates**: User interacts with the UI → actions flow back → tools called again → UI updates in real-time
 
-If you want to run the host somewhere else, the only runtime deps you need are `@mcp-ui/client` and `@modelcontextprotocol/sdk` (for the `EmbeddedResource` type).
+This is **exactly** how Claude Desktop or Cursor would handle MCP-UI resources!
+
+## 🚀 Quick Start
+
+### 1. Install Dependencies
+
+```bash
+cd test-client
+npm install
+```
+
+### 2. Configure Environment
+
+Create a `.env` file in the `test-client` directory:
+
+```env
+GEMINI_API_KEY=your-gemini-api-key-here
+MCP_WS_URL=ws://localhost:8080/mcp
+```
+
+**To get a Gemini API key:**
+1. Go to https://aistudio.google.com/app/apikey
+2. Click "Create API Key"
+3. Copy the key and paste it into your `.env` file
+
+### 3. Start the MCP Server
+
+In a separate terminal:
+
+```bash
+cd server
+mvn spring-boot:run
+```
+
+Wait until you see: `Started McpServerApplication`
+
+### 4. Start the Test Client
+
+```bash
+cd test-client
+npm run dev
+```
+
+You should see:
+```
+🚀 Starting MCP Chat Client with Gemini...
+📡 Connecting to MCP server at ws://localhost:8080/mcp...
+✅ Connected! Found 4 tools:
+   • todo_create: Create a todo item
+   • todo_list: List all todo items
+   • todo_update: Update a todo item
+   • todo_delete: Delete a todo item
+
+🌐 Chat UI is ready!
+
+   👉 Open: http://localhost:3003
+```
+
+### 5. Open the Chat Interface
+
+Open http://localhost:3003 in your browser and start chatting!
+
+## 💬 Example Conversations
+
+Try these natural language prompts:
+
+- **"Show me my todos"** → Gemini calls `todo_list` → Interactive dashboard appears inline
+- **"Add a new todo for buying groceries"** → Gemini calls `todo_create` → Dashboard updates with new todo
+- **"Mark the first todo as completed"** → Gemini calls `todo_update` → UI refreshes instantly
+- **"Delete the todo with id abc-123"** → Gemini calls `todo_delete` → Todo disappears
+
+## 🔄 How It Works
+
+1. **User types a message** in natural language
+2. **Gemini analyzes** the message using its native function calling
+3. **Gemini decides** which MCP tool to call based on the tools' descriptions
+4. **Tool is executed** via WebSocket to your Spring Boot MCP server
+5. **Server responds** with:
+   - JSON data (todo list, created todo, etc.)
+   - **MCP-UI resource** (the interactive HTML dashboard)
+6. **UI renders inline** in the chat conversation using an iframe
+7. **User interacts** with forms/buttons in the rendered UI
+8. **Actions flow back** through the chat → Gemini calls tools again → UI updates
+
+## 🎨 What You'll See
+
+- **Chat interface** similar to Claude/ChatGPT
+- **Messages** from you and the assistant
+- **Interactive UI cards** that appear inline when tools return MCP-UI resources
+- **Real-time updates** as you interact with the dashboard
+
+## 🛠️ Architecture
+
+- **Frontend**: React-based chat UI (served as static HTML)
+- **Backend**: Node.js server that:
+  - Connects to MCP server via WebSocket
+  - Integrates Gemini AI with function calling
+  - Handles chat messages and tool execution
+  - Returns MCP-UI resources for inline rendering
+
+## 🐛 Troubleshooting
+
+**"Failed to connect to MCP server"**
+- Make sure the Spring Boot server is running on port 8080
+- Check that `MCP_WS_URL` in `.env` matches your server URL
+
+**"GEMINI_API_KEY environment variable is required"**
+- Make sure you created a `.env` file
+- Verify the API key is correct (no extra spaces)
+
+**UI doesn't render**
+- Check browser console for errors
+- Verify the MCP server is returning UI resources (check server logs)
+
+## 📚 Next Steps
+
+Once you've tested this locally, you can:
+- Deploy the MCP server to a cloud provider
+- Use it with real LLM clients like Claude Desktop or Cursor
+- Add more complex UI interactions
+- Extend with additional tools
+
 
 ## 5. Testing the Integration Quickly
 
